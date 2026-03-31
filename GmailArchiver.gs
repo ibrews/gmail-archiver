@@ -21,6 +21,11 @@
  * progress and schedules itself to resume in ~1 minute. No data is lost.
  * A mailbox with 10,000 messages typically completes in 3-5 runs.
  *
+ * QUOTA: This script minimizes Gmail API calls by batch-fetching messages
+ * per thread group and caching per-message getters (body, attachments).
+ * If you hit daily quota limits, just wait until midnight PT and re-run —
+ * it resumes automatically from where it left off.
+ *
  * LICENSE: MIT
  */
 
@@ -197,10 +202,14 @@ function runArchiver_() {
       break;
     }
 
-    for (const thread of threads) {
+    // Batch-fetch all messages in one API call (much cheaper than per-thread)
+    const allMessages = GmailApp.getMessagesForThreads(threads);
+
+    for (let t = 0; t < threads.length; t++) {
       if (Date.now() - startTime > CONFIG.MAX_RUNTIME_MS) break;
 
-      const messages = thread.getMessages();
+      const thread = threads[t];
+      const messages = allMessages[t];
       for (const msg of messages) {
         const msgId = msg.getId();
         if (processedIds.has(msgId)) continue;
@@ -283,6 +292,23 @@ function extractMessageData_(msg, thread, headers) {
   const fromEmail = extractEmail_(from);
   const fromName = from.replace(/<[^>]+>/, '').replace(/"/g, '').trim() || fromEmail;
 
+  // Cache expensive API calls — each getter counts against the daily quota
+  let _plainBody = null;
+  function getPlainBodyCached() {
+    if (_plainBody === null) {
+      try { _plainBody = msg.getPlainBody() || ''; } catch(e) { _plainBody = ''; }
+    }
+    return _plainBody;
+  }
+
+  let _attachments = null;
+  function getAttachmentsCached() {
+    if (_attachments === null) {
+      try { _attachments = msg.getAttachments({includeInlineImages: false}); } catch(e) { _attachments = []; }
+    }
+    return _attachments;
+  }
+
   const row = [];
 
   for (const h of headers) {
@@ -309,23 +335,15 @@ function extractMessageData_(msg, thread, headers) {
         row.push(msg.getSubject() || '(no subject)');
         break;
       case 'Snippet':
-        try {
-          const plain = msg.getPlainBody() || '';
-          row.push(plain.substring(0, 200).replace(/[\n\r]+/g, ' ').trim());
-        } catch(e) {
-          row.push('');
-        }
+        row.push(getPlainBodyCached().substring(0, 200).replace(/[\n\r]+/g, ' ').trim());
         break;
-      case 'Body':
-        try {
-          let body = msg.getPlainBody() || '';
-          if (body.length > CONFIG.BODY_MAX_LENGTH) {
-            body = body.substring(0, CONFIG.BODY_MAX_LENGTH) + '... [truncated]';
-          }
-          row.push(body.replace(/\n{3,}/g, '\n\n').trim());
-        } catch(e) {
-          row.push('[Error reading body]');
+      case 'Body': {
+        let body = getPlainBodyCached();
+        if (body.length > CONFIG.BODY_MAX_LENGTH) {
+          body = body.substring(0, CONFIG.BODY_MAX_LENGTH) + '... [truncated]';
         }
+        row.push(body.replace(/\n{3,}/g, '\n\n').trim());
+      }
         break;
       case 'Labels':
         row.push(thread.getLabels().map(l => l.getName()).join(', '));
@@ -336,16 +354,12 @@ function extractMessageData_(msg, thread, headers) {
       case 'Unread':
         row.push(msg.isUnread());
         break;
-      case 'Has Attachments': {
-        const atts = msg.getAttachments({includeInlineImages: false});
-        row.push(atts.length > 0);
+      case 'Has Attachments':
+        row.push(getAttachmentsCached().length > 0);
         break;
-      }
-      case 'Attachment Names': {
-        const atts2 = msg.getAttachments({includeInlineImages: false});
-        row.push(atts2.map(a => a.getName()).join(', '));
+      case 'Attachment Names':
+        row.push(getAttachmentsCached().map(a => a.getName()).join(', '));
         break;
-      }
       case 'Thread ID':
         row.push(thread.getId());
         break;
