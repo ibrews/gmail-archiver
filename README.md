@@ -56,6 +56,14 @@ Select any of these from the function dropdown and run them directly:
 | `archiveWithAttachments` | Messages that have attachments || `archiveLabel` | Messages with a specific label (edit the label name in the function) |
 | `archiveCustomQuery` | Any custom Gmail search query (edit the query in the function) |
 
+## Things to Try
+
+1. **Paste `GmailArchiver.gs` into a new Apps Script project, select `archiveInbox`, and click Run** — after authorizing, a formatted Google Sheet appears with one row per message, sortable columns, and frozen headers.
+2. **Select `archiveSent` and run it** — a second pass adds your sent messages; compare the "From" column to see both sides of a thread.
+3. **Edit `CONFIG.QUERY` to `from:boss@company.com after:2024/01/01`** and run `archiveCustomQuery` — only matching messages appear; any valid Gmail search syntax works here.
+4. **Let it run on a large mailbox (1,000+ messages)** — when the 6-minute Apps Script limit approaches, it saves progress to a `_Meta` sheet and stops cleanly; run it again to resume exactly where it left off.
+5. **Add a column filter on "Has Attachments" in the sheet, then filter to TRUE** — instantly see every email with an attachment alongside the file names in the "Attachment Names" column.
+
 ## Custom Queries
 
 The `CONFIG.QUERY` field accepts any [Gmail search syntax](https://support.google.com/mail/answer/7190). Some examples:
